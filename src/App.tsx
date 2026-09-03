@@ -10,7 +10,8 @@ import { UserSettingsPanel } from './components/UserSettingsPanel';
 import { QuestionType, MarkingResult, BenchmarkExemplar } from './types';
 import { BENCHMARK_EXEMPLARS } from './data/benchmarks';
 import { Sparkles, AlertCircle } from 'lucide-react';
-import { getStoredApiKey, setStoredApiKey, getApiHeaders } from './utils/apiKey';
+import { getStoredApiKey, setStoredApiKey } from './utils/apiKey';
+import { markEssayDirect } from './services/geminiClient';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'marker' | 'benchmarks' | 'rubrics' | 'chat'>('marker');
@@ -55,24 +56,14 @@ export default function App() {
       setIsMarking(true);
       setError(null);
 
-      const response = await fetch('/api/mark-essay', {
-        method: 'POST',
-        headers: getApiHeaders(apiKey),
-        body: JSON.stringify({
-          essayText,
-          questionType,
-          questionTitle,
-          extractsText,
-          apiKey,
-        }),
+      // Direct client-side browser fetch to Google Gemini API using the user-provided API key
+      const result = await markEssayDirect(apiKey, {
+        essayText,
+        questionType,
+        questionTitle,
+        extractsText,
       });
 
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || 'Failed to mark essay.');
-      }
-
-      const result: MarkingResult = await response.json();
       setMarkingResult(result);
 
       // Trigger confetti on high grades
@@ -88,8 +79,8 @@ export default function App() {
       // Scroll smoothly to dashboard
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err: any) {
-      console.error(err);
-      setError(err.message || 'An error occurred while marking the essay.');
+      console.error('Error marking essay:', err);
+      setError(err?.message || 'An error occurred while evaluating the essay.');
     } finally {
       setIsMarking(false);
     }

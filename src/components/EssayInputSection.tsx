@@ -13,7 +13,8 @@ import {
 } from 'lucide-react';
 import { QuestionType } from '../types';
 import { BENCHMARK_EXEMPLARS } from '../data/benchmarks';
-import { getApiHeaders, getStoredApiKey } from '../utils/apiKey';
+import { getStoredApiKey } from '../utils/apiKey';
+import { transcribeHandwritingDirect } from '../services/geminiClient';
 
 interface EssayInputSectionProps {
   questionType: QuestionType;
@@ -82,54 +83,54 @@ export const EssayInputSection: React.FC<EssayInputSectionProps> = ({
 
   // Handle handwritten photo OCR upload
   const handleImageOCR = async (file: File) => {
-    try {
-      setOcrLoading(true);
-      setErrorMessage(null);
-      setOcrSuccessMessage(null);
+    setOcrLoading(true);
+    setErrorMessage(null);
+    setOcrSuccessMessage(null);
 
+    const key = apiKey || getStoredApiKey();
+    if (!key) {
+      setErrorMessage('Please enter your free Gemini API Key in the User Settings panel above to transcribe handwriting.');
+      setOcrLoading(false);
+      return;
+    }
+
+    try {
       const reader = new FileReader();
       reader.onload = async () => {
-        const base64Data = reader.result as string;
-        const key = apiKey || getStoredApiKey();
-
-        if (!key) {
-          setErrorMessage('Please enter your free Gemini API Key in the User Settings panel above to transcribe handwriting.');
-          setOcrLoading(false);
-          return;
-        }
-        
-        const response = await fetch('/api/transcribe-handwriting', {
-          method: 'POST',
-          headers: getApiHeaders(key),
-          body: JSON.stringify({
+        try {
+          const base64Data = reader.result as string;
+          
+          // Direct client-side browser fetch to Google Gemini API
+          const transcribed = await transcribeHandwritingDirect(key, {
             imageBase64: base64Data,
             mimeType: file.type || 'image/png',
-            apiKey: key,
-          }),
-        });
+          });
 
-        if (!response.ok) {
-          const err = await response.json();
-          throw new Error(err.error || 'Failed to transcribe handwriting.');
-        }
-
-        const data = await response.json();
-        const transcribed = data.transcribedText || '';
-        
-        // Append or replace
-        if (essayText.trim()) {
-          setEssayText(essayText + '\n\n' + transcribed);
-          setOcrSuccessMessage(`Transcribed and appended page from "${file.name}"!`);
-        } else {
-          setEssayText(transcribed);
-          setOcrSuccessMessage(`Transcribed handwriting from "${file.name}"!`);
+          // Append or replace
+          if (essayText.trim()) {
+            setEssayText(essayText + '\n\n' + transcribed);
+            setOcrSuccessMessage(`Transcribed and appended page from "${file.name}"!`);
+          } else {
+            setEssayText(transcribed);
+            setOcrSuccessMessage(`Transcribed handwriting from "${file.name}"!`);
+          }
+        } catch (innerErr: any) {
+          console.error('OCR transcription error:', innerErr);
+          setErrorMessage(innerErr?.message || 'Error transcribing handwriting from image.');
+        } finally {
+          setOcrLoading(false);
         }
       };
+
+      reader.onerror = () => {
+        setErrorMessage('Failed to read image file.');
+        setOcrLoading(false);
+      };
+
       reader.readAsDataURL(file);
     } catch (err: any) {
       console.error(err);
-      setErrorMessage(err.message || 'Error transcribing handwriting.');
-    } finally {
+      setErrorMessage(err?.message || 'Error processing image file.');
       setOcrLoading(false);
     }
   };

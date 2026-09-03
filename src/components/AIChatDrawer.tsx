@@ -13,7 +13,8 @@ import {
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { ChatMessage, MarkingResult } from '../types';
-import { getApiHeaders, getStoredApiKey } from '../utils/apiKey';
+import { getStoredApiKey } from '../utils/apiKey';
+import { chatWithHistorianDirect } from '../services/geminiClient';
 
 interface AIChatDrawerProps {
   isOpen: boolean;
@@ -97,28 +98,18 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
     }
 
     try {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: getApiHeaders(key),
-        body: JSON.stringify({
-          message: userText,
-          history: messages.map((m) => ({ role: m.role, content: m.content })),
-          essayContext: essayText,
-          markingResult: markingResult,
-          apiKey: key,
-        }),
+      // Direct client-side browser fetch to Google Gemini API
+      const reply = await chatWithHistorianDirect(key, {
+        message: userText,
+        history: messages.map((m) => ({ role: m.role, content: m.content })),
+        essayContext: essayText,
+        markingResult: markingResult,
       });
 
-      if (!response.ok) {
-        const err = await response.json();
-        throw new Error(err.error || 'Failed to reach AI Tutor.');
-      }
-
-      const data = await response.json();
       const assistantMsg: ChatMessage = {
         id: `ai-${Date.now()}`,
         role: 'assistant',
-        content: data.reply || 'No response received from tutor.',
+        content: reply || 'No response received from tutor.',
         timestamp: Date.now(),
       };
 
@@ -130,7 +121,7 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
         {
           id: `err-${Date.now()}`,
           role: 'assistant',
-          content: `⚠️ **Error connecting to Examiner AI:** ${err.message || 'Please check your connection and try again.'}`,
+          content: `⚠️ **Error connecting to Examiner AI:** ${err?.message || 'Please check your connection and try again.'}`,
           timestamp: Date.now(),
         },
       ]);
