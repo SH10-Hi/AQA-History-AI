@@ -1,30 +1,153 @@
 // WARNING: Client-side API key usage.
 // The user enters their own free Google Gemini API key in the UI, which is stored in browser LocalStorage.
-// Direct browser fetches target Google's official REST endpoint: https://googleapis.com
+// Direct browser fetches target Google's official REST endpoint: https://generativelanguage.googleapis.com
 // for static hosting compatibility (Vercel, Netlify, GitHub Pages) without any local/relative /api/ backend routes.
 // Non-JSON responses (e.g. 404/502 HTML pages) are safely handled to prevent UI crashes.
 
 import { MarkingResult, QuestionType } from '../types';
 
-// Candidate models for direct REST calls in order of preference (excluding unavailable models)
-const CANDIDATE_MODELS = [
+// Active, reliable Gemini model endpoints (prioritizing stable high-throughput flash models)
+export const DEFAULT_MODEL = 'gemini-2.0-flash';
+
+export const CANDIDATE_MODELS = [
   'gemini-2.0-flash',
   'gemini-1.5-flash',
-  'gemini-flash-latest',
 ];
 
-interface CallGeminiParams {
+export interface CallGeminiParams {
   contents: any[];
   systemInstruction?: string;
   responseMimeType?: string;
   temperature?: number;
+  onStatusUpdate?: (status: string) => void;
+}
+
+/**
+ * Categorizes and formats errors into differentiated, user-facing notifications:
+ * - 503 / 429: "The server is temporarily busy. Automatically retrying..."
+ * - 404 / Invalid Model: "Model endpoint not found. Please verify API model configuration."
+ * - Invalid Key / Quota: "API key invalid or quota exceeded."
+ */
+export function formatGeminiErrorMessage(error: any): string {
+  if (!error) return 'The server is temporarily busy. Automatically retrying...';
+  const rawMsg = typeof error === 'string' ? error : error?.message || String(error);
+  const lower = rawMsg.toLowerCase();
+
+  // 1. Invalid Key / Quota Exceeded
+  if (
+    lower.includes('api key invalid or quota exceeded') ||
+    lower.includes('api_key_invalid') ||
+    lower.includes('invalid api key') ||
+    lower.includes('key not valid') ||
+    lower.includes('key not found') ||
+    lower.includes('quota exceeded') ||
+    (lower.includes('quota') && lower.includes('exceeded')) ||
+    (lower.includes('api key') && (lower.includes('enter') || lower.includes('invalid') || lower.includes('expired')))
+  ) {
+    return 'API key invalid or quota exceeded.';
+  }
+
+  // 2. 404 / Invalid Model Endpoint
+  if (
+    lower.includes('model endpoint not found') ||
+    lower.includes('verify api model configuration') ||
+    lower.includes('invalid model') ||
+    lower.includes('models/') ||
+    lower.includes('404') ||
+    (lower.includes('model') && lower.includes('not found'))
+  ) {
+    return 'Model endpoint not found. Please verify API model configuration.';
+  }
+
+  // 3. 503 / 429 / Server Busy (Transient or Exhausted)
+  if (
+    lower.includes('503') ||
+    lower.includes('429') ||
+    lower.includes('temporarily busy') ||
+    lower.includes('momentarily busy') ||
+    lower.includes('resource_exhausted') ||
+    lower.includes('service unavailable') ||
+    lower.includes('rate limit') ||
+    lower.includes('overloaded') ||
+    lower.includes('high demand')
+  ) {
+    return 'The server is temporarily busy. Automatically retrying...';
+  }
+
+  return rawMsg;
+}
+
+/**
+ * Internal classification helper for HTTP status and error text
+ */
+function classifyResponseError(status: number, message: string): {
+  type: 'invalid_key' | 'invalid_model' | 'busy' | 'other';
+  userMessage: string;
+} {
+  const lower = (message || '').toLowerCase();
+
+  // Invalid Key or Quota
+  if (
+    status === 401 ||
+    status === 403 ||
+    lower.includes('api_key_invalid') ||
+    lower.includes('api key not valid') ||
+    lower.includes('invalid api key') ||
+    lower.includes('key not found') ||
+    lower.includes('quota exceeded') ||
+    (status === 400 && lower.includes('api key'))
+  ) {
+    return {
+      type: 'invalid_key',
+      userMessage: 'API key invalid or quota exceeded.',
+    };
+  }
+
+  // 404 / Invalid Model
+  if (
+    status === 404 ||
+    lower.includes('not found') ||
+    lower.includes('models/') ||
+    lower.includes('is not found') ||
+    lower.includes('invalid model')
+  ) {
+    return {
+      type: 'invalid_model',
+      userMessage: 'Model endpoint not found. Please verify API model configuration.',
+    };
+  }
+
+  // 503 / 429 / Server Busy
+  if (
+    status === 503 ||
+    status === 429 ||
+    lower.includes('resource_exhausted') ||
+    lower.includes('rate limit') ||
+    lower.includes('high demand') ||
+    lower.includes('overloaded') ||
+    lower.includes('service unavailable') ||
+    lower.includes('temporarily busy') ||
+    lower.includes('momentarily busy')
+  ) {
+    return {
+      type: 'busy',
+      userMessage: 'The server is temporarily busy. Automatically retrying...',
+    };
+  }
+
+  return {
+    type: 'other',
+    userMessage: message || `HTTP ${status}`,
+  };
 }
 
 /**
  * Safely parse an HTTP response, gracefully handling non-JSON responses (HTML error pages, plain text)
  * to avoid syntax errors like "Unexpected token 'T', 'The page c'... is not valid JSON".
  */
-export async function safeParseResponse(response: Response): Promise<{ ok: boolean; data: any; errorText?: string }> {
+export async function safeParseResponse(
+  response: Response
+): Promise<{ ok: boolean; data: any; errorText?: string; status: number }> {
   let rawText = '';
   try {
     rawText = await response.text();
@@ -32,6 +155,7 @@ export async function safeParseResponse(response: Response): Promise<{ ok: boole
     return {
       ok: false,
       data: null,
+      status: response.status,
       errorText: `Failed to read network response: ${err?.message || 'Connection interrupted'}`,
     };
   }
@@ -51,15 +175,18 @@ export async function safeParseResponse(response: Response): Promise<{ ok: boole
     return {
       ok: false,
       data: null,
+      status: response.status,
       errorText: `Server returned non-JSON response (HTTP ${response.status}): ${friendlySnippet}`,
     };
   }
 
   if (!response.ok) {
-    const errorMsg = parsed?.error?.message || parsed?.error || parsed?.message || `HTTP ${response.status}`;
+    const errorMsg =
+      parsed?.error?.message || parsed?.error || parsed?.message || `HTTP ${response.status}`;
     return {
       ok: false,
       data: parsed,
+      status: response.status,
       errorText: errorMsg,
     };
   }
@@ -67,6 +194,7 @@ export async function safeParseResponse(response: Response): Promise<{ ok: boole
   return {
     ok: true,
     data: parsed,
+    status: response.status,
   };
 }
 
@@ -84,13 +212,21 @@ function extractJsonString(rawText: string): string {
 }
 
 /**
- * Executes a direct browser fetch to the Google Gemini API with automatic model fallback
- * and resilient error handling for transient errors and non-JSON server responses.
+ * Executes a direct browser fetch to Google Gemini API with:
+ * 1. Exponential Backoff & Retry Logic:
+ *    - Catches 503 (Service Unavailable) and 429 (Too Many Requests / Resource Exhausted)
+ *    - Automatically retries up to 3 times with increasing delays (2s, 4s, 8s)
+ * 2. Active Model Fallback:
+ *    - Uses active, reliable endpoints ("gemini-2.0-flash", "gemini-1.5-flash")
+ * 3. Graceful Differentiated Error Handling:
+ *    - 503 / 429: "The server is temporarily busy. Automatically retrying..."
+ *    - 404 / Invalid Model: "Model endpoint not found. Please verify API model configuration."
+ *    - Invalid Key: "API key invalid or quota exceeded."
  */
-async function callGeminiRest(
+export async function callGeminiRest(
   apiKey?: string,
   params: CallGeminiParams = { contents: [] },
-  preferredModel: string = CANDIDATE_MODELS[0]
+  preferredModel: string = DEFAULT_MODEL
 ): Promise<string> {
   // Retrieve custom API key passed in or directly from browser LocalStorage
   let cleanKey = (apiKey || '').trim();
@@ -99,7 +235,7 @@ async function callGeminiRest(
   }
 
   if (!cleanKey) {
-    throw new Error('Please enter your free Gemini API Key in the User Settings panel above to start.');
+    throw new Error('API key invalid or quota exceeded.');
   }
 
   const modelsToTry = [
@@ -107,10 +243,13 @@ async function callGeminiRest(
     ...CANDIDATE_MODELS.filter((m) => m !== preferredModel),
   ];
 
+  const MAX_RETRIES = 3;
+  const RETRY_DELAYS = [2000, 4000, 8000]; // 2s, 4s, 8s exponential backoff
+
   let lastError: Error | null = null;
 
   for (const model of modelsToTry) {
-    for (let attempt = 1; attempt <= 2; attempt++) {
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
         const requestBody: Record<string, any> = {
           contents: params.contents,
@@ -139,7 +278,7 @@ async function callGeminiRest(
         ];
 
         let response: Response | null = null;
-        let parsedResult: { ok: boolean; data: any; errorText?: string } | null = null;
+        let parsedResult: { ok: boolean; data: any; errorText?: string; status: number } | null = null;
 
         for (let i = 0; i < candidateEndpoints.length; i++) {
           const url = candidateEndpoints[i];
@@ -155,13 +294,13 @@ async function callGeminiRest(
             });
 
             parsedResult = await safeParseResponse(response);
-            // If the endpoint returns 404 and we have another candidate, fall back
+            // If the endpoint returns 404 and we have another candidate domain, try it
             if (!parsedResult.ok && response.status === 404 && i < candidateEndpoints.length - 1) {
               continue;
             }
             break;
           } catch (fetchErr: any) {
-            // If CORS or network blocks one endpoint, try the remaining candidates
+            // If network/CORS error occurs on first endpoint, try the secondary domain
             if (i < candidateEndpoints.length - 1) {
               continue;
             }
@@ -175,45 +314,32 @@ async function callGeminiRest(
 
         if (!parsedResult.ok) {
           const rawErrMsg = parsedResult.errorText || `HTTP ${response.status}`;
-          const lower = rawErrMsg.toLowerCase();
+          const classification = classifyResponseError(response.status, rawErrMsg);
 
-          // Check for invalid or expired API key immediately
-          if (
-            lower.includes('api_key_invalid') ||
-            lower.includes('api key not valid') ||
-            lower.includes('invalid api key') ||
-            lower.includes('key not found') ||
-            (response.status === 400 && lower.includes('api key'))
-          ) {
-            throw new Error(
-              'The provided Gemini API Key is invalid or expired. Please check and re-enter your key in the User Settings panel above.'
-            );
+          // 1. Invalid API Key: immediately fail without retrying
+          if (classification.type === 'invalid_key') {
+            throw new Error(classification.userMessage);
           }
 
-          // Check if model not found on v1beta or rate-limited
-          const isModelNotFound = response.status === 404 || lower.includes('not found');
-          const isTransient =
-            response.status === 503 ||
-            response.status === 429 ||
-            lower.includes('high demand') ||
-            lower.includes('unavailable') ||
-            lower.includes('resource_exhausted') ||
-            lower.includes('overloaded');
-
-          if (isModelNotFound) {
-            // Immediately skip to next model in the candidate chain
-            lastError = new Error(rawErrMsg);
-            break;
+          // 2. 404 / Invalid Model: skip retries on this model and try next model fallback
+          if (classification.type === 'invalid_model') {
+            lastError = new Error(classification.userMessage);
+            break; // breaks inner attempt loop, moves to next model in modelsToTry
           }
 
-          if (isTransient) {
-            lastError = new Error(
-              'Google Gemini AI servers are momentarily busy. Please try submitting again in a few seconds.'
-            );
-            if (attempt === 1) {
-              await new Promise((resolve) => setTimeout(resolve, 1200));
-              continue;
+          // 3. 503 / 429 / Server Busy: Exponential backoff & retry up to 3 times
+          if (classification.type === 'busy') {
+            if (attempt < MAX_RETRIES) {
+              const delay = RETRY_DELAYS[attempt] || 2000 * Math.pow(2, attempt);
+              if (params.onStatusUpdate) {
+                params.onStatusUpdate('The server is temporarily busy. Automatically retrying...');
+              }
+              await new Promise((resolve) => setTimeout(resolve, delay));
+              continue; // retry attempt
             }
+
+            // Exhausted all 3 retries on this model
+            lastError = new Error(classification.userMessage);
             break;
           }
 
@@ -240,14 +366,14 @@ async function callGeminiRest(
         lastError = err;
         const msg = (err?.message || '').toLowerCase();
         // If it is explicitly an invalid key error, do not retry further models
-        if (msg.includes('invalid or expired') || msg.includes('user settings panel')) {
+        if (msg.includes('api key invalid') || msg.includes('user settings panel')) {
           throw err;
         }
       }
     }
   }
 
-  throw lastError || new Error('Failed to communicate with Google Gemini API across all model fallbacks.');
+  throw lastError || new Error('The server is temporarily busy. Automatically retrying...');
 }
 
 /**
@@ -255,7 +381,7 @@ async function callGeminiRest(
  */
 export async function transcribeHandwritingDirect(
   apiKey?: string,
-  params?: { imageBase64: string; mimeType: string }
+  params?: { imageBase64: string; mimeType: string; onStatusUpdate?: (status: string) => void }
 ): Promise<string> {
   const p = params || { imageBase64: '', mimeType: 'image/png' };
   const prompt = `You are an expert AQA A-Level History examiner and transcription specialist.
@@ -286,6 +412,7 @@ Transcribe the handwritten or typed essay from this student notebook page image 
   return await callGeminiRest(apiKey, {
     contents,
     temperature: 0.1,
+    onStatusUpdate: p.onStatusUpdate,
   });
 }
 
@@ -300,6 +427,7 @@ export async function markEssayDirect(
     questionTitle?: string;
     extractsText?: string;
     imageBase64List?: Array<{ data: string; mimeType: string }>;
+    onStatusUpdate?: (status: string) => void;
   }
 ): Promise<MarkingResult> {
   const p = params || { essayText: '', questionType: 'essay_25' };
@@ -433,6 +561,7 @@ Please return your evaluation in the following strict JSON schema:
     systemInstruction,
     responseMimeType: 'application/json',
     temperature: 0.2,
+    onStatusUpdate: p.onStatusUpdate,
   });
 
   const jsonStr = extractJsonString(rawOutput);
@@ -500,6 +629,7 @@ export async function chatWithHistorianDirect(
     history: Array<{ role: string; content: string }>;
     essayContext?: string;
     markingResult?: MarkingResult | null;
+    onStatusUpdate?: (status: string) => void;
   }
 ): Promise<string> {
   const p = params || { message: '', history: [] };
@@ -548,5 +678,6 @@ ${(p.essayContext || '').slice(0, 3000)}
     contents,
     systemInstruction,
     temperature: 0.4,
+    onStatusUpdate: p.onStatusUpdate,
   });
 }

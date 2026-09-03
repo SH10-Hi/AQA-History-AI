@@ -9,9 +9,9 @@ import { AIChatDrawer } from './components/AIChatDrawer';
 import { UserSettingsPanel } from './components/UserSettingsPanel';
 import { QuestionType, MarkingResult, BenchmarkExemplar } from './types';
 import { BENCHMARK_EXEMPLARS } from './data/benchmarks';
-import { Sparkles, AlertCircle } from 'lucide-react';
+import { Sparkles, AlertCircle, RefreshCw } from 'lucide-react';
 import { getStoredApiKey, setStoredApiKey } from './utils/apiKey';
-import { markEssayDirect } from './services/geminiClient';
+import { markEssayDirect, formatGeminiErrorMessage } from './services/geminiClient';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'marker' | 'benchmarks' | 'rubrics' | 'chat'>('marker');
@@ -20,6 +20,7 @@ export default function App() {
   const [extractsText, setExtractsText] = useState('');
   const [essayText, setEssayText] = useState(BENCHMARK_EXEMPLARS[0].essayText);
   const [isMarking, setIsMarking] = useState(false);
+  const [markingStatus, setMarkingStatus] = useState<string | null>(null);
   const [markingResult, setMarkingResult] = useState<MarkingResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState<string>(() => getStoredApiKey());
@@ -27,7 +28,7 @@ export default function App() {
   const handleApiKeyChange = (newKey: string) => {
     setApiKey(newKey);
     setStoredApiKey(newKey);
-    if (newKey.trim() && error?.includes('Gemini API Key')) {
+    if (newKey.trim() && error?.includes('API key')) {
       setError(null);
     }
   };
@@ -39,7 +40,7 @@ export default function App() {
   // Mark essay submission
   const handleMarkEssay = async () => {
     if (!apiKey.trim()) {
-      setError('Please enter your free Gemini API Key in the User Settings panel above to start.');
+      setError('API key invalid or quota exceeded.');
       const panel = document.getElementById('user-settings-panel');
       if (panel) {
         panel.scrollIntoView({ behavior: 'smooth' });
@@ -55,6 +56,7 @@ export default function App() {
     try {
       setIsMarking(true);
       setError(null);
+      setMarkingStatus(null);
 
       // Direct client-side browser fetch to Google Gemini API using the user-provided API key
       const result = await markEssayDirect(apiKey, {
@@ -62,6 +64,9 @@ export default function App() {
         questionType,
         questionTitle,
         extractsText,
+        onStatusUpdate: (status) => {
+          setMarkingStatus(status);
+        },
       });
 
       setMarkingResult(result);
@@ -80,9 +85,11 @@ export default function App() {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err: any) {
       console.error('Error marking essay:', err);
-      setError(err?.message || 'An error occurred while evaluating the essay.');
+      const friendlyError = formatGeminiErrorMessage(err);
+      setError(friendlyError);
     } finally {
       setIsMarking(false);
+      setMarkingStatus(null);
     }
   };
 
@@ -146,6 +153,19 @@ export default function App() {
 
       {/* Main Body */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4">
+        {/* Server Busy / Automatic Retry Status notification */}
+        {isMarking && markingStatus && (
+          <div className="mb-4 p-4 bg-amber-50 border border-amber-300 rounded-lg text-amber-950 text-xs shadow-xs">
+            <div className="flex items-center gap-3">
+              <RefreshCw className="w-5 h-5 text-amber-600 animate-spin shrink-0" />
+              <div className="flex-1">
+                <h4 className="font-bold text-amber-900 text-sm">Examiner AI Status</h4>
+                <p className="text-amber-800 font-medium leading-relaxed mt-0.5">{markingStatus}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Error notification */}
         {error && (
           <div className="mb-4 p-4 bg-rose-50 border border-rose-300 rounded-lg text-rose-950 text-xs shadow-xs">

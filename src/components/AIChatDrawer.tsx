@@ -14,7 +14,7 @@ import {
 import Markdown from 'react-markdown';
 import { ChatMessage, MarkingResult } from '../types';
 import { getStoredApiKey } from '../utils/apiKey';
-import { chatWithHistorianDirect } from '../services/geminiClient';
+import { chatWithHistorianDirect, formatGeminiErrorMessage } from '../services/geminiClient';
 
 interface AIChatDrawerProps {
   isOpen: boolean;
@@ -116,12 +116,13 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({
       setMessages((prev) => [...prev, assistantMsg]);
     } catch (err: any) {
       console.error(err);
+      const friendlyError = formatGeminiErrorMessage(err);
       setMessages((prev) => [
         ...prev,
         {
           id: `err-${Date.now()}`,
           role: 'assistant',
-          content: `⚠️ **Error connecting to Examiner AI:** ${err?.message || 'Please check your connection and try again.'}`,
+          content: `⚠️ **Examiner System Notice:** ${friendlyError}`,
           timestamp: Date.now(),
         },
       ]);

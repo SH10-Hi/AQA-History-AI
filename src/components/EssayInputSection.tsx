@@ -14,7 +14,7 @@ import {
 import { QuestionType } from '../types';
 import { BENCHMARK_EXEMPLARS } from '../data/benchmarks';
 import { getStoredApiKey } from '../utils/apiKey';
-import { transcribeHandwritingDirect } from '../services/geminiClient';
+import { transcribeHandwritingDirect, formatGeminiErrorMessage } from '../services/geminiClient';
 
 interface EssayInputSectionProps {
   questionType: QuestionType;
@@ -116,7 +116,7 @@ export const EssayInputSection: React.FC<EssayInputSectionProps> = ({
           }
         } catch (innerErr: any) {
           console.error('OCR transcription error:', innerErr);
-          setErrorMessage(innerErr?.message || 'Error transcribing handwriting from image.');
+          setErrorMessage(formatGeminiErrorMessage(innerErr));
         } finally {
           setOcrLoading(false);
         }
@@ -130,7 +130,7 @@ export const EssayInputSection: React.FC<EssayInputSectionProps> = ({
       reader.readAsDataURL(file);
     } catch (err: any) {
       console.error(err);
-      setErrorMessage(err?.message || 'Error processing image file.');
+      setErrorMessage(formatGeminiErrorMessage(err));
       setOcrLoading(false);
     }
   };
