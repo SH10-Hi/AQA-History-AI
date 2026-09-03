@@ -1,15 +1,16 @@
-// NOTE: Direct client-side browser calls to Google Gemini API using the user's provided API key
-// from LocalStorage, designed for static hosting (e.g. Vercel, Netlify, GitHub Pages) without backend dependencies.
-// Handles non-JSON error responses gracefully (e.g., 404/502 HTML pages) to prevent UI crashes.
+// WARNING: Client-side API key usage.
+// The user enters their own free Google Gemini API key in the UI, which is stored in browser LocalStorage.
+// Direct browser fetches are made to Google's official REST endpoints on generativelanguage.googleapis.com
+// for static hosting compatibility (Vercel, Netlify, GitHub Pages) without any local/relative /api/ backend routes.
+// Non-JSON responses (e.g. 404/502 HTML pages) are safely handled to prevent UI crashes.
 
 import { MarkingResult, QuestionType } from '../types';
 
 // Candidate models for direct REST calls in order of preference
 const CANDIDATE_MODELS = [
-  'gemini-2.5-flash',
   'gemini-2.0-flash',
   'gemini-1.5-flash',
-  'gemini-flash-latest',
+  'gemini-2.5-flash',
 ];
 
 interface CallGeminiParams {
@@ -87,11 +88,16 @@ function extractJsonString(rawText: string): string {
  * and resilient error handling for transient errors and non-JSON server responses.
  */
 async function callGeminiRest(
-  apiKey: string,
-  params: CallGeminiParams,
+  apiKey?: string,
+  params: CallGeminiParams = { contents: [] },
   preferredModel: string = CANDIDATE_MODELS[0]
 ): Promise<string> {
-  const cleanKey = (apiKey || '').trim();
+  // Retrieve custom API key passed in or directly from browser LocalStorage
+  let cleanKey = (apiKey || '').trim();
+  if (!cleanKey && typeof window !== 'undefined' && window.localStorage) {
+    cleanKey = (window.localStorage.getItem('gemini_api_key') || '').trim();
+  }
+
   if (!cleanKey) {
     throw new Error('Please enter your free Gemini API Key in the User Settings panel above to start.');
   }
@@ -106,6 +112,7 @@ async function callGeminiRest(
   for (const model of modelsToTry) {
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
+        // Direct browser fetch to Google's official Generative AI REST endpoint
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(cleanKey)}`;
 
         const requestBody: Record<string, any> = {
@@ -132,6 +139,7 @@ async function callGeminiRest(
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            'x-goog-api-key': cleanKey,
           },
           body: JSON.stringify(requestBody),
         });
@@ -219,9 +227,10 @@ async function callGeminiRest(
  * Transcribe student handwriting directly from client-side browser fetch
  */
 export async function transcribeHandwritingDirect(
-  apiKey: string,
-  params: { imageBase64: string; mimeType: string }
+  apiKey?: string,
+  params?: { imageBase64: string; mimeType: string }
 ): Promise<string> {
+  const p = params || { imageBase64: '', mimeType: 'image/png' };
   const prompt = `You are an expert AQA A-Level History examiner and transcription specialist.
 Transcribe the handwritten or typed essay from this student notebook page image with high fidelity.
 - Preserve the exact student wording, paragraph breaks, and headings.
@@ -229,14 +238,14 @@ Transcribe the handwritten or typed essay from this student notebook page image 
 - If teacher red pen marks or grades are visible, note them in a bracketed annotation like [Teacher Note: ...].
 - Output ONLY the transcribed essay text clearly and cleanly formatted.`;
 
-  const cleanBase64 = params.imageBase64.replace(/^data:image\/[a-zA-Z+]+;base64,/, '');
+  const cleanBase64 = p.imageBase64.replace(/^data:image\/[a-zA-Z+]+;base64,/, '');
 
   const contents = [
     {
       parts: [
         {
           inlineData: {
-            mimeType: params.mimeType || 'image/png',
+            mimeType: p.mimeType || 'image/png',
             data: cleanBase64,
           },
         },
@@ -257,8 +266,8 @@ Transcribe the handwritten or typed essay from this student notebook page image 
  * Direct client-side essay marking via Google Gemini API
  */
 export async function markEssayDirect(
-  apiKey: string,
-  params: {
+  apiKey?: string,
+  params?: {
     essayText: string;
     questionType: QuestionType;
     questionTitle?: string;
@@ -266,7 +275,8 @@ export async function markEssayDirect(
     imageBase64List?: Array<{ data: string; mimeType: string }>;
   }
 ): Promise<MarkingResult> {
-  const isSourceQuestion = params.questionType === 'source_30';
+  const p = params || { essayText: '', questionType: 'essay_25' };
+  const isSourceQuestion = p.questionType === 'source_30';
   const maxMarks = isSourceQuestion ? 30 : 25;
 
   const systemInstruction = `You are a Senior Principal Examiner for AQA A-Level History (7042).
@@ -307,18 +317,18 @@ Your role is to mark student essays with rigorous accuracy according to official
 Grade the student submission strictly using these exact standards.
 Return a valid JSON object matching the requested schema.`;
 
-  const userPrompt = `Student Question Title: "${params.questionTitle || (isSourceQuestion ? 'AQA 30-Mark Source Extract Question' : 'AQA 25-Mark Essay Question')}"
+  const userPrompt = `Student Question Title: "${p.questionTitle || (isSourceQuestion ? 'AQA 30-Mark Source Extract Question' : 'AQA 25-Mark Essay Question')}"
 Question Type: ${isSourceQuestion ? '30-Mark Source Extract Question' : '25-Mark Section B Essay'}
-${params.extractsText ? `Extracts Provided for Analysis:\n${params.extractsText}\n\n` : ''}
+${p.extractsText ? `Extracts Provided for Analysis:\n${p.extractsText}\n\n` : ''}
 Student Essay Text:
 """
-${params.essayText || '(Images provided)'}
+${p.essayText || '(Images provided)'}
 """
 
 Please return your evaluation in the following strict JSON schema:
 {
-  "questionType": "${params.questionType}",
-  "questionTitle": "${(params.questionTitle || '').replace(/"/g, "'")}",
+  "questionType": "${p.questionType}",
+  "questionTitle": "${(p.questionTitle || '').replace(/"/g, "'")}",
   "mark": 18,
   "maxMarks": ${maxMarks},
   "level": "L4",
@@ -361,7 +371,7 @@ Please return your evaluation in the following strict JSON schema:
     }
   },
   "aqaScaleComparison": {
-    "scaleType": "${params.questionType}",
+    "scaleType": "${p.questionType}",
     "currentLevel": "L4",
     "currentMark": 18,
     "maxMarks": ${maxMarks},
@@ -378,8 +388,8 @@ Please return your evaluation in the following strict JSON schema:
 
   const parts: any[] = [];
 
-  if (params.imageBase64List && params.imageBase64List.length > 0) {
-    for (const img of params.imageBase64List) {
+  if (p.imageBase64List && p.imageBase64List.length > 0) {
+    for (const img of p.imageBase64List) {
       parts.push({
         inlineData: {
           mimeType: img.mimeType || 'image/png',
@@ -408,15 +418,15 @@ Please return your evaluation in the following strict JSON schema:
 
   // Sanitize and guarantee all required fields for UI safety
   const sanitizedResult: MarkingResult = {
-    questionType: params.questionType,
-    questionTitle: parsed.questionTitle || params.questionTitle || 'AQA History Essay',
+    questionType: p.questionType,
+    questionTitle: parsed.questionTitle || p.questionTitle || 'AQA History Essay',
     mark: typeof parsed.mark === 'number' ? parsed.mark : 15,
     maxMarks: maxMarks as 25 | 30,
     level: (['L1', 'L2', 'L3', 'L4', 'L5'].includes(parsed.level) ? parsed.level : 'L3') as any,
     grade: (['A*', 'A', 'B', 'C', 'D', 'E', 'U'].includes(parsed.grade) ? parsed.grade : 'C') as any,
     levelDescriptor: parsed.levelDescriptor || 'Demonstrates understanding with appropriate historical evidence.',
     executiveSummary: parsed.executiveSummary || 'The essay demonstrates historical knowledge with room for more sustained analytical judgement.',
-    wordCount: typeof parsed.wordCount === 'number' ? parsed.wordCount : (params.essayText.trim().split(/\s+/).filter(Boolean).length || 500),
+    wordCount: typeof parsed.wordCount === 'number' ? parsed.wordCount : (p.essayText.trim().split(/\s+/).filter(Boolean).length || 500),
     rubricBreakdown: Array.isArray(parsed.rubricBreakdown) ? parsed.rubricBreakdown : [],
     paragraphAnalysis: Array.isArray(parsed.paragraphAnalysis) ? parsed.paragraphAnalysis : [],
     upgradeAdvice: parsed.upgradeAdvice || {
@@ -432,7 +442,7 @@ Please return your evaluation in the following strict JSON schema:
       },
     },
     aqaScaleComparison: parsed.aqaScaleComparison || {
-      scaleType: params.questionType,
+      scaleType: p.questionType,
       currentLevel: parsed.level || 'L3',
       currentMark: typeof parsed.mark === 'number' ? parsed.mark : 15,
       maxMarks,
@@ -457,25 +467,26 @@ Please return your evaluation in the following strict JSON schema:
  * Direct client-side AI Tutor chat via Google Gemini API
  */
 export async function chatWithHistorianDirect(
-  apiKey: string,
-  params: {
+  apiKey?: string,
+  params?: {
     message: string;
     history: Array<{ role: string; content: string }>;
     essayContext?: string;
     markingResult?: MarkingResult | null;
   }
 ): Promise<string> {
+  const p = params || { message: '', history: [] };
   const systemInstruction = `You are "Master Historian AI", an elite, supportive, and incisive AQA A-Level History tutor and Senior Examiner.
 You are helping a student understand their feedback, improve their historical arguments, and upgrade their essay writing.
 
 ### THE STUDENT'S ESSAY & MARKING CONTEXT:
-Question Title: ${params.markingResult?.questionTitle || 'A-Level History Question'}
-Question Type: ${params.markingResult?.questionType === 'source_30' ? '30-Mark Source Extract Question' : '25-Mark Essay Question'}
-Assigned Mark: ${params.markingResult?.mark ?? 'N/A'} / ${params.markingResult?.maxMarks ?? 25} (Level: ${params.markingResult?.level ?? 'N/A'}, Grade: ${params.markingResult?.grade ?? 'N/A'})
-Executive Summary: ${params.markingResult?.executiveSummary || 'Essay reviewed'}
+Question Title: ${p.markingResult?.questionTitle || 'A-Level History Question'}
+Question Type: ${p.markingResult?.questionType === 'source_30' ? '30-Mark Source Extract Question' : '25-Mark Essay Question'}
+Assigned Mark: ${p.markingResult?.mark ?? 'N/A'} / ${p.markingResult?.maxMarks ?? 25} (Level: ${p.markingResult?.level ?? 'N/A'}, Grade: ${p.markingResult?.grade ?? 'N/A'})
+Executive Summary: ${p.markingResult?.executiveSummary || 'Essay reviewed'}
 
 Original Essay Excerpt:
-${(params.essayContext || '').slice(0, 3000)}
+${(p.essayContext || '').slice(0, 3000)}
 
 ### OFFICIAL AQA CALIBRATION RULES YOU MUST UPHOLD:
 1. 24/25 A* standard (e.g. Stalin essay): Flawless balance, sustained analytical judgement throughout, rich specific evidence (statistics, dates, names).
@@ -492,8 +503,8 @@ ${(params.essayContext || '').slice(0, 3000)}
 
   const contents: any[] = [];
 
-  if (params.history && Array.isArray(params.history)) {
-    for (const msg of params.history) {
+  if (p.history && Array.isArray(p.history)) {
+    for (const msg of p.history) {
       contents.push({
         role: msg.role === 'assistant' ? 'model' : 'user',
         parts: [{ text: msg.content }],
@@ -503,7 +514,7 @@ ${(params.essayContext || '').slice(0, 3000)}
 
   contents.push({
     role: 'user',
-    parts: [{ text: params.message }],
+    parts: [{ text: p.message }],
   });
 
   return await callGeminiRest(apiKey, {
