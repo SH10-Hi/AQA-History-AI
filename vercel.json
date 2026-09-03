@@ -1,4 +1,8 @@
 {
+  "buildCommand": "vite build --mode production",
+  "outputDirectory": "dist",
+  "framework": "vite",
+  "cleanUrls": true,
   "rewrites": [
     {
       "source": "/(.*)",

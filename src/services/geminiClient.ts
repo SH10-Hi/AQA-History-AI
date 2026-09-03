@@ -132,31 +132,41 @@ async function callGeminiRest(
 
         requestBody.generationConfig = generationConfig;
 
-        // Direct browser fetch targeting the new model endpoint: https://googleapis.com
+        // Direct browser fetch targeting Google Generative AI REST endpoints
         const candidateEndpoints = [
-          `https://googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(cleanKey)}`,
           `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(cleanKey)}`,
+          `https://googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(cleanKey)}`,
         ];
 
         let response: Response | null = null;
         let parsedResult: { ok: boolean; data: any; errorText?: string } | null = null;
 
-        for (const url of candidateEndpoints) {
-          response = await fetch(url, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-goog-api-key': cleanKey,
-            },
-            body: JSON.stringify(requestBody),
-          });
+        for (let i = 0; i < candidateEndpoints.length; i++) {
+          const url = candidateEndpoints[i];
+          try {
+            response = await fetch(url, {
+              method: 'POST',
+              mode: 'cors',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-goog-api-key': cleanKey,
+              },
+              body: JSON.stringify(requestBody),
+            });
 
-          parsedResult = await safeParseResponse(response);
-          // If the apex endpoint returns 404, fall back to the generativelanguage subdomain
-          if (!parsedResult.ok && response.status === 404 && url.startsWith('https://googleapis.com')) {
-            continue;
+            parsedResult = await safeParseResponse(response);
+            // If the endpoint returns 404 and we have another candidate, fall back
+            if (!parsedResult.ok && response.status === 404 && i < candidateEndpoints.length - 1) {
+              continue;
+            }
+            break;
+          } catch (fetchErr: any) {
+            // If CORS or network blocks one endpoint, try the remaining candidates
+            if (i < candidateEndpoints.length - 1) {
+              continue;
+            }
+            throw fetchErr;
           }
-          break;
         }
 
         if (!parsedResult || !response) {
