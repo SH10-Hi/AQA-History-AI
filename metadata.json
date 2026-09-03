@@ -1,0 +1,7 @@
+{
+  "name": "AQA A-Level History Essay Marker & Chatbot",
+  "description": "AI essay marking chatbot and grading coach calibrated to official AQA A-Level History mark schemes and real student benchmark exemplars.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
