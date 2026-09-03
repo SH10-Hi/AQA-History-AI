@@ -1,16 +1,16 @@
 // WARNING: Client-side API key usage.
 // The user enters their own free Google Gemini API key in the UI, which is stored in browser LocalStorage.
-// Direct browser fetches are made to Google's official REST endpoints on generativelanguage.googleapis.com
+// Direct browser fetches target Google's official REST endpoint: https://googleapis.com
 // for static hosting compatibility (Vercel, Netlify, GitHub Pages) without any local/relative /api/ backend routes.
 // Non-JSON responses (e.g. 404/502 HTML pages) are safely handled to prevent UI crashes.
 
 import { MarkingResult, QuestionType } from '../types';
 
-// Candidate models for direct REST calls in order of preference
+// Candidate models for direct REST calls in order of preference (excluding unavailable models)
 const CANDIDATE_MODELS = [
   'gemini-2.0-flash',
   'gemini-1.5-flash',
-  'gemini-2.5-flash',
+  'gemini-flash-latest',
 ];
 
 interface CallGeminiParams {
@@ -112,9 +112,6 @@ async function callGeminiRest(
   for (const model of modelsToTry) {
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        // Direct browser fetch to Google's official Generative AI REST endpoint
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(cleanKey)}`;
-
         const requestBody: Record<string, any> = {
           contents: params.contents,
         };
@@ -135,16 +132,36 @@ async function callGeminiRest(
 
         requestBody.generationConfig = generationConfig;
 
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-goog-api-key': cleanKey,
-          },
-          body: JSON.stringify(requestBody),
-        });
+        // Direct browser fetch targeting the new model endpoint: https://googleapis.com
+        const candidateEndpoints = [
+          `https://googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(cleanKey)}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(cleanKey)}`,
+        ];
 
-        const parsedResult = await safeParseResponse(response);
+        let response: Response | null = null;
+        let parsedResult: { ok: boolean; data: any; errorText?: string } | null = null;
+
+        for (const url of candidateEndpoints) {
+          response = await fetch(url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-goog-api-key': cleanKey,
+            },
+            body: JSON.stringify(requestBody),
+          });
+
+          parsedResult = await safeParseResponse(response);
+          // If the apex endpoint returns 404, fall back to the generativelanguage subdomain
+          if (!parsedResult.ok && response.status === 404 && url.startsWith('https://googleapis.com')) {
+            continue;
+          }
+          break;
+        }
+
+        if (!parsedResult || !response) {
+          throw new Error('No response received from Google model endpoint.');
+        }
 
         if (!parsedResult.ok) {
           const rawErrMsg = parsedResult.errorText || `HTTP ${response.status}`;
