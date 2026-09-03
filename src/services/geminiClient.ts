@@ -271,46 +271,26 @@ export async function callGeminiRest(
 
         requestBody.generationConfig = generationConfig;
 
-        // Direct browser fetch targeting Google Generative AI REST endpoints
-        const candidateEndpoints = [
-          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(cleanKey)}`,
-          `https://googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(cleanKey)}`,
-        ];
+        // Direct browser fetch targeting Google Generative AI REST endpoint
+        // Pass the API key ONLY via query parameter; omit custom headers like 'x-goog-api-key'
+        // to prevent browser CORS preflight (OPTIONS) check failures.
+        const endpointUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(cleanKey)}`;
 
-        let response: Response | null = null;
-        let parsedResult: { ok: boolean; data: any; errorText?: string; status: number } | null = null;
-
-        for (let i = 0; i < candidateEndpoints.length; i++) {
-          const url = candidateEndpoints[i];
-          try {
-            response = await fetch(url, {
-              method: 'POST',
-              mode: 'cors',
-              headers: {
-                'Content-Type': 'application/json',
-                'x-goog-api-key': cleanKey,
-              },
-              body: JSON.stringify(requestBody),
-            });
-
-            parsedResult = await safeParseResponse(response);
-            // If the endpoint returns 404 and we have another candidate domain, try it
-            if (!parsedResult.ok && response.status === 404 && i < candidateEndpoints.length - 1) {
-              continue;
-            }
-            break;
-          } catch (fetchErr: any) {
-            // If network/CORS error occurs on first endpoint, try the secondary domain
-            if (i < candidateEndpoints.length - 1) {
-              continue;
-            }
-            throw fetchErr;
-          }
+        let response: Response;
+        try {
+          response = await fetch(endpointUrl, {
+            method: 'POST',
+            mode: 'cors',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(requestBody),
+          });
+        } catch (fetchErr: any) {
+          throw fetchErr;
         }
 
-        if (!parsedResult || !response) {
-          throw new Error('No response received from Google model endpoint.');
-        }
+        const parsedResult = await safeParseResponse(response);
 
         if (!parsedResult.ok) {
           const rawErrMsg = parsedResult.errorText || `HTTP ${response.status}`;
