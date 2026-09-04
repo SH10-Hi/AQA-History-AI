@@ -7,11 +7,14 @@
 import { MarkingResult, QuestionType } from '../types';
 
 // Active, reliable Gemini model endpoints (prioritizing stable high-throughput flash models)
-export const DEFAULT_MODEL = 'gemini-2.0-flash';
+export const DEFAULT_MODEL = 'gemini-3.6-flash';
 
 export const CANDIDATE_MODELS = [
-  'gemini-2.0-flash',
-  'gemini-1.5-flash',
+  'gemini-3.6-flash',
+  'gemini-3.5-flash',
+  'gemini-3.1-flash-lite',
+  'gemini-flash-latest',
+  'gemini-3.8-flash',
 ];
 
 export interface CallGeminiParams {
@@ -109,7 +112,9 @@ function classifyResponseError(status: number, message: string): {
     lower.includes('not found') ||
     lower.includes('models/') ||
     lower.includes('is not found') ||
-    lower.includes('invalid model')
+    lower.includes('invalid model') ||
+    lower.includes('no longer available') ||
+    lower.includes('not supported for generatecontent')
   ) {
     return {
       type: 'invalid_model',
@@ -217,7 +222,7 @@ function extractJsonString(rawText: string): string {
  *    - Catches 503 (Service Unavailable) and 429 (Too Many Requests / Resource Exhausted)
  *    - Automatically retries up to 3 times with increasing delays (2s, 4s, 8s)
  * 2. Active Model Fallback:
- *    - Uses active, reliable endpoints ("gemini-2.0-flash", "gemini-1.5-flash")
+ *    - Uses active, reliable endpoints ("gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite")
  * 3. Graceful Differentiated Error Handling:
  *    - 503 / 429: "The server is temporarily busy. Automatically retrying..."
  *    - 404 / Invalid Model: "Model endpoint not found. Please verify API model configuration."
@@ -228,10 +233,16 @@ export async function callGeminiRest(
   params: CallGeminiParams = { contents: [] },
   preferredModel: string = DEFAULT_MODEL
 ): Promise<string> {
-  // Retrieve custom API key passed in or directly from browser LocalStorage
+  // Retrieve custom API key passed in, from browser LocalStorage, or from environment
   let cleanKey = (apiKey || '').trim();
   if (!cleanKey && typeof window !== 'undefined' && window.localStorage) {
     cleanKey = (window.localStorage.getItem('gemini_api_key') || '').trim();
+  }
+  if (!cleanKey && typeof process !== 'undefined' && process.env?.GEMINI_API_KEY) {
+    cleanKey = (process.env.GEMINI_API_KEY || '').trim();
+  }
+  if (!cleanKey && (import.meta as any).env?.VITE_GEMINI_API_KEY) {
+    cleanKey = ((import.meta as any).env.VITE_GEMINI_API_KEY || '').trim();
   }
 
   if (!cleanKey) {

@@ -2,9 +2,11 @@ export const GEMINI_API_KEY_STORAGE_KEY = 'gemini_api_key';
 
 export function getStoredApiKey(): string {
   try {
-    return localStorage.getItem(GEMINI_API_KEY_STORAGE_KEY) || '';
+    const saved = localStorage.getItem(GEMINI_API_KEY_STORAGE_KEY) || '';
+    if (saved.trim()) return saved.trim();
+    return (process.env.GEMINI_API_KEY || (import.meta as any).env?.VITE_GEMINI_API_KEY || '').trim();
   } catch {
-    return '';
+    return (process.env.GEMINI_API_KEY || (import.meta as any).env?.VITE_GEMINI_API_KEY || '').trim();
   }
 }
 
