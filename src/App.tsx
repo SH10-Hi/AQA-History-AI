@@ -38,7 +38,17 @@ export default function App() {
   const [chatInitialPrompt, setChatInitialPrompt] = useState<string | null>(null);
 
   // Mark essay submission
-  const handleMarkEssay = async () => {
+  const handleMarkEssay = async (overrideParams?: {
+    essayText?: string;
+    questionType?: QuestionType;
+    questionTitle?: string;
+    extractsText?: string;
+  }) => {
+    const textToMark = overrideParams?.essayText ?? essayText;
+    const typeToMark = overrideParams?.questionType ?? questionType;
+    const titleToMark = overrideParams?.questionTitle ?? questionTitle;
+    const extractsToMark = overrideParams?.extractsText ?? extractsText;
+
     if (!apiKey.trim()) {
       setError('API key invalid or quota exceeded.');
       const panel = document.getElementById('user-settings-panel');
@@ -48,7 +58,7 @@ export default function App() {
       return;
     }
 
-    if (!essayText.trim()) {
+    if (!textToMark.trim()) {
       setError('Please provide or upload an essay before marking.');
       return;
     }
@@ -60,10 +70,10 @@ export default function App() {
 
       // Direct client-side browser fetch to Google Gemini API using the user-provided API key
       const result = await markEssayDirect(apiKey, {
-        essayText,
-        questionType,
-        questionTitle,
-        extractsText,
+        essayText: textToMark,
+        questionType: typeToMark,
+        questionTitle: titleToMark,
+        extractsText: extractsToMark,
         onStatusUpdate: (status) => {
           setMarkingStatus(status);
         },
@@ -115,9 +125,12 @@ export default function App() {
     setEssayText(exemplar.essayText);
     setMarkingResult(null);
     setActiveTab('marker');
-    setTimeout(() => {
-      handleMarkEssay();
-    }, 100);
+    handleMarkEssay({
+      essayText: exemplar.essayText,
+      questionType: exemplar.questionType,
+      questionTitle: exemplar.questionPrompt,
+      extractsText: exemplar.extractsText || '',
+    });
   };
 
   // Open Chat with specific prompt
@@ -179,7 +192,7 @@ export default function App() {
 
                 <div className="flex flex-wrap items-center gap-2 pt-1">
                   <button
-                    onClick={handleMarkEssay}
+                    onClick={() => handleMarkEssay()}
                     disabled={isMarking}
                     className="px-3 py-1.5 bg-rose-700 hover:bg-rose-800 text-white font-bold rounded text-xs transition-colors shadow-2xs flex items-center gap-1.5"
                   >

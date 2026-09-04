@@ -332,6 +332,41 @@ export const MarkingDashboard: React.FC<MarkingDashboardProps> = ({
                       </p>
                     </div>
 
+                    {/* Benchmark Resource Calibration Card */}
+                    {result.benchmarkComparison && (
+                      <div className="p-4 bg-gradient-to-br from-indigo-50/80 via-white to-slate-50 rounded-lg border border-indigo-200 shadow-2xs space-y-2.5">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 pb-2 border-b border-indigo-100">
+                          <div className="flex items-center gap-2">
+                            <Award className="w-4 h-4 text-indigo-600 shrink-0" />
+                            <span className="text-xs font-bold text-slate-900 uppercase tracking-wide">
+                              Calibrated Benchmark Comparison
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5 text-xs">
+                            <span className="text-slate-500">Closest Anchor:</span>
+                            <span className="font-bold text-indigo-900 bg-indigo-100/80 px-2 py-0.5 rounded border border-indigo-300">
+                              {result.benchmarkComparison.closestBenchmarkTitle} ({result.benchmarkComparison.closestBenchmarkMark}/{result.maxMarks} • {result.benchmarkComparison.closestBenchmarkGrade})
+                            </span>
+                          </div>
+                        </div>
+
+                        <p className="text-xs text-slate-700 leading-relaxed font-sans">
+                          {result.benchmarkComparison.comparativeRationale}
+                        </p>
+
+                        {result.benchmarkComparison.alignmentCriteriaMet && result.benchmarkComparison.alignmentCriteriaMet.length > 0 && (
+                          <div className="pt-2 flex flex-wrap gap-1.5">
+                            {result.benchmarkComparison.alignmentCriteriaMet.map((crit, idx) => (
+                              <span key={idx} className="text-[11px] px-2 py-0.5 rounded-full bg-white text-slate-700 border border-slate-200 flex items-center gap-1 shadow-2xs">
+                                <CheckCircle className="w-3 h-3 text-emerald-600 shrink-0" />
+                                {crit}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {/* Rubric Criteria Grid */}
                     <div>
                       <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">

@@ -47,6 +47,14 @@ export interface AqaScaleComparison {
   missingElementsKeepingInCurrentBand: string[];
 }
 
+export interface BenchmarkComparison {
+  closestBenchmarkTitle: string;
+  closestBenchmarkMark: number;
+  closestBenchmarkGrade: string;
+  comparativeRationale: string;
+  alignmentCriteriaMet: string[];
+}
+
 export interface MarkingResult {
   questionType: QuestionType;
   questionTitle: string;
@@ -60,6 +68,7 @@ export interface MarkingResult {
   paragraphAnalysis: ParagraphFeedback[];
   upgradeAdvice: UpgradeAdvice;
   aqaScaleComparison?: AqaScaleComparison;
+  benchmarkComparison?: BenchmarkComparison;
   examinerTips: string[];
   wordCount: number;
 }
